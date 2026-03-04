@@ -16,7 +16,7 @@ type ConfigOption func(c *Config) error
 func SetURL(url string) ConfigOption {
 	return func(c *Config) error {
 		if !(strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://")) {
-			return &valueError{"lingo: api url must be a valid http/https url"}
+			return &ValueError{"lingo: api url must be a valid http/https url"}
 		}
 		c.APIURL = url
 		return nil
@@ -26,7 +26,7 @@ func SetURL(url string) ConfigOption {
 func SetBatchSize(batch int) ConfigOption {
 	return func(c *Config) error {
 		if batch < 1 || batch > 250 {
-			return &valueError{"lingo: batch size should be between 1-250"}
+			return &ValueError{"lingo: batch size should be between 1-250"}
 		}
 		c.BatchSize = batch
 		return nil
@@ -36,7 +36,7 @@ func SetBatchSize(batch int) ConfigOption {
 func SetIdealBatchItemSize(size int) ConfigOption {
 	return func(c *Config) error {
 		if size < 1 || size > 2500 {
-			return &valueError{"lingo: ideal batch item size should be between 1-2500"}
+			return &ValueError{"lingo: ideal batch item size should be between 1-2500"}
 		}
 		c.IdealBatchItemSize = size
 		return nil
