@@ -1,7 +1,6 @@
 package lingo
 
 import (
-	"fmt"
 	"net/http"
 	"time"
 )
@@ -13,7 +12,7 @@ type Client struct {
 
 func NewClient(apiKey string, opts ...ConfigOption) (*Client, error) {
 	if apiKey == "" {
-		return nil, fmt.Errorf("lingo: api key is required")
+		return nil, &valueError{"lingo: api key is required"}
 	}
 	config, err  := newEngineConfig(apiKey, opts...)
 	if err != nil {
