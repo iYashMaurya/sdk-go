@@ -64,31 +64,31 @@ func (c *Client) do(url string, requestData map[string]any) (any, error) {
 	if err != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to marshall request data: %s ", err)}
 	}
-	
-	// Create HTTP request 
+
+	// Create HTTP request
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(dataByte))
 	if err != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to create a new request: %s ", err)}
 	}
-	
-	// Set headers 
+
+	// Set headers
 	authorization := fmt.Sprintf("Bearer %s", c.config.APIKey)
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Authorization", authorization)
-	
+
 	// Execute request
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to send the http request to the server: %s ", err)}
 	}
-	
-	// Read Body Once 
+
+	// Read Body Once
 	defer resp.Body.Close()
 	byteData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to read response body: %s ", err)}
 	}
-	
+
 	// Check Status Code
 	if resp.StatusCode != 200 {
 		responsePreview := truncateResponse(string(byteData))
@@ -109,26 +109,47 @@ func (c *Client) do(url string, requestData map[string]any) (any, error) {
 			return nil, &RuntimeError{fmt.Sprintf("lingo: request failed (%d): %s. ", resp.StatusCode, responsePreview)}
 		}
 	}
-	
+
 	// Parse JSON from same byteData
-	
-	var jsonResponse map[string] any 
-	
+
+	var jsonResponse map[string]any
+
 	err = json.Unmarshal(byteData, &jsonResponse)
 	if err != nil {
 		preview := truncateResponse(string(byteData))
 		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to parse api response as json (status %d). this may indicate a gateway or proxy error. response: %s ", resp.StatusCode, preview)}
 	}
-	
-	// Check API level error 
+
+	// Check API level error
 	data := jsonResponse["data"]
 	apiErr := jsonResponse["error"]
 
 	if data == nil && apiErr != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: %s", apiErr)}
 	}
-	
+
 	// Return data field
 	return data, nil
 
+}
+
+func countWords(payload any) int {
+	switch v := payload.(type) {
+	case []any:
+		total := 0
+		for _, item := range v {
+			total += countWords(item)
+		}
+		return total
+	case map[string]any:
+		total := 0
+		for _, value := range v {
+			total += countWords(value)
+		}
+		return total
+	case string:
+		return len(strings.Fields(v))
+	default:
+		return 0
+	}
 }
