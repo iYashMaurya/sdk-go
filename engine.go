@@ -86,3 +86,29 @@ func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, 
 
 	return merged, nil
 }
+
+// LocalizeText translates a single text string to the target locale specified in params.
+func (c *Client) LocalizeText(text string, params LocalizationParams) (string, error) {
+	if text == "" {
+		return "", &ValueError{"lingo: text must not be empty"}
+	}
+
+	payload := map[string]any{"text": text}
+
+	result, err := c.localizeRaw(payload, params, false)
+	if err != nil {
+		return "", err
+	}
+
+	localized, ok := result["text"].(string)
+	if !ok {
+		return "", &RuntimeError{"lingo: unexpected response type for localized text"}
+	}
+
+	return localized, nil
+}
+
+// LocalizeObject translates all string values in the given map to the target locale specified in params.
+func (c *Client) LocalizeObject(obj map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
+	return c.localizeRaw(obj, params, concurrent)
+}
