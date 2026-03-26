@@ -2,6 +2,7 @@ package lingo
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,7 +45,7 @@ func truncateResponse(text string) string {
 	return text
 }
 
-func (c *Client) do(endpoint string, requestData any) (any, error) {
+func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any, error) {
 	// Marshall data
 	dataByte, err := json.Marshal(requestData)
 	if err != nil {
@@ -60,7 +61,7 @@ func (c *Client) do(endpoint string, requestData any) (any, error) {
 		}
 
 		// Create HTTP request
-		req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(dataByte))
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(dataByte))
 		if err != nil {
 			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to create a new request: %s", err)}
 		}
@@ -175,7 +176,7 @@ func (c *Client) extractChunks(payload map[string]any) []map[string]any {
 	return result
 }
 
-func (c *Client) localizeChunk(sourceLocale *string, workflowID, targetLocale string, payload map[string]any, fast bool) (any, error) {
+func (c *Client) localizeChunk(ctx context.Context, sourceLocale *string, workflowID, targetLocale string, payload map[string]any, fast bool) (any, error) {
 	endpoint, err := url.JoinPath(c.config.APIURL, "/i18n")
 	if err != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
@@ -201,7 +202,7 @@ func (c *Client) localizeChunk(sourceLocale *string, workflowID, targetLocale st
 		requestData.Reference = ref
 	}
 
-	data, err := c.do(endpoint, requestData)
+	data, err := c.do(ctx, endpoint, requestData)
 
 	if err != nil {
 		return nil, err
