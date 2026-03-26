@@ -3,6 +3,7 @@ package lingo
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sync"
 
 	gonanoid "github.com/matoous/go-nanoid/v2"
@@ -62,13 +63,14 @@ func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, 
 			return nil, err
 		}
 	} else {
+		ctx := context.Background()
 		for _, chunk := range chunks {
 			chunkPayload := map[string]any{"data": chunk}
 			if params.Reference != nil {
 				chunkPayload["reference"] = params.Reference
 			}
 
-			result, err := c.localizeChunk(context.Background(), params.SourceLocale, workflowID, params.TargetLocale, chunkPayload, fast)
+			result, err := c.localizeChunk(ctx, params.SourceLocale, workflowID, params.TargetLocale, chunkPayload, fast)
 			if err != nil {
 				return nil, err
 			}
@@ -172,4 +174,68 @@ func (c *Client) LocalizeChat(chat []map[string]string, params LocalizationParam
 	}
 
 	return localized, nil
+}
+
+// RecognizeLocale detects the locale of the given text.
+func (c *Client) RecognizeLocale(text string) (string, error) {
+	if text == "" {
+		return "", &ValueError{"lingo: text must not be empty"}
+	}
+
+	endpoint, err := url.JoinPath(c.config.APIURL, "/recognize")
+	if err != nil {
+		return "", &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
+	}
+
+	requestData := map[string]any{"text": text}
+
+	data, err := c.do(context.Background(), endpoint, requestData)
+	if err != nil {
+		return "", err
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		return "", &RuntimeError{"lingo: unexpected response type for recognized locale"}
+	}
+
+	locale, ok := dataMap["locale"].(string)
+	if !ok {
+		return "", &RuntimeError{"lingo: missing locale field in response"}
+	}
+
+	return locale, nil
+}
+
+// WhoAmI returns the authenticated user's information, or nil if not authenticated.
+func (c *Client) WhoAmI() (map[string]string, error) {
+	endpoint, err := url.JoinPath(c.config.APIURL, "/whoami")
+	if err != nil {
+		return nil, &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
+	}
+
+	data, err := c.do(context.Background(), endpoint, map[string]any{})
+	if err != nil {
+		return nil, err
+	}
+
+	if data == nil {
+		return nil, nil
+	}
+
+	dataMap, ok := data.(map[string]any)
+	if !ok {
+		return nil, &RuntimeError{"lingo: unexpected response type for whoami"}
+	}
+
+	result := make(map[string]string, len(dataMap))
+	for k, v := range dataMap {
+		str, ok := v.(string)
+		if !ok {
+			continue
+		}
+		result[k] = str
+	}
+
+	return result, nil
 }
