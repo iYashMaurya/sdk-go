@@ -15,7 +15,7 @@ type RequestData struct {
 }
 
 type parameter struct {
-	WorkflowId string `json:"workflowId"`
+	WorkflowID string `json:"workflowId"`
 	Fast       bool   `json:"fast"`
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -21,7 +22,7 @@ type Client struct {
 
 func NewClient(apiKey string, opts ...ConfigOption) (*Client, error) {
 	if apiKey == "" {
-		return nil, &ValueError{"lingo: api key is required "}
+		return nil, &ValueError{"lingo: api key is required"}
 	}
 	config, err := newEngineConfig(apiKey, opts...)
 	if err != nil {
@@ -43,94 +44,91 @@ func truncateResponse(text string) string {
 	return text
 }
 
-func safeParseJSON(resp *http.Response) (map[string]any, error) {
-	var response map[string]any
-	defer resp.Body.Close()
-	byteData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to read response body: %s ", err)}
-	}
-	err = json.Unmarshal(byteData, &response)
-	if err != nil {
-		preview := truncateResponse(string(byteData))
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to parse api response as json (status %d). this may indicate a gateway or proxy error. response: %s ", resp.StatusCode, preview)}
-	}
-	return response, nil
-}
-
-func (c *Client) do(url string, requestData map[string]any) (any, error) {
+func (c *Client) do(endpoint string, requestData any) (any, error) {
 	// Marshall data
 	dataByte, err := json.Marshal(requestData)
 	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to marshall request data: %s ", err)}
+		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to marshall request data: %s", err)}
 	}
 
-	// Create HTTP request
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(dataByte))
-	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to create a new request: %s ", err)}
-	}
+	const maxRetries = 3
+	var lastErr error
 
-	// Set headers
-	authorization := fmt.Sprintf("Bearer %s", c.config.APIKey)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	req.Header.Set("Authorization", authorization)
-
-	// Execute request
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to send the http request to the server: %s ", err)}
-	}
-
-	// Read Body Once
-	defer resp.Body.Close()
-	byteData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to read response body: %s ", err)}
-	}
-
-	// Check Status Code
-	if resp.StatusCode != 200 {
-		responsePreview := truncateResponse(string(byteData))
-
-		parts := strings.SplitN(resp.Status, " ", 2)
-
-		var reasonPhrase string
-
-		if len(parts) >= 2 {
-			reasonPhrase = parts[1]
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			time.Sleep(time.Duration(1<<uint(attempt-1)) * time.Second)
 		}
 
-		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: server error %d : %s.  this may be due to temporary service issues. response: %s ", resp.StatusCode, reasonPhrase, responsePreview)}
-		} else if resp.StatusCode == 400 {
-			return nil, &ValueError{fmt.Sprintf("lingo: invalid request (%d): %s.  response: %s ", resp.StatusCode, reasonPhrase, responsePreview)}
-		} else {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: request failed (%d): %s. ", resp.StatusCode, responsePreview)}
+		// Create HTTP request
+		req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewBuffer(dataByte))
+		if err != nil {
+			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to create a new request: %s", err)}
 		}
+
+		// Set headers
+		authorization := fmt.Sprintf("Bearer %s", c.config.APIKey)
+		req.Header.Set("Content-Type", "application/json; charset=utf-8")
+		req.Header.Set("Authorization", authorization)
+
+		// Execute request
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			lastErr = &RuntimeError{fmt.Sprintf("lingo: failed to send the http request to the server: %s", err)}
+			continue
+		}
+
+		// Read Body Once
+		byteData, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to read response body: %s", err)}
+		}
+
+		// Check Status Code
+		if resp.StatusCode != http.StatusOK {
+			responsePreview := truncateResponse(string(byteData))
+
+			parts := strings.SplitN(resp.Status, " ", 2)
+
+			var reasonPhrase string
+
+			if len(parts) >= 2 {
+				reasonPhrase = parts[1]
+			}
+
+			if resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode < 600 {
+				lastErr = &RuntimeError{fmt.Sprintf("lingo: server error %d : %s. this may be due to temporary service issues. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
+				continue
+			} else if resp.StatusCode == http.StatusBadRequest {
+				return nil, &ValueError{fmt.Sprintf("lingo: invalid request (%d): %s. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
+			} else {
+				return nil, &RuntimeError{fmt.Sprintf("lingo: request failed (%d): %s.", resp.StatusCode, responsePreview)}
+			}
+		}
+
+		// Parse JSON from same byteData
+
+		var jsonResponse map[string]any
+
+		err = json.Unmarshal(byteData, &jsonResponse)
+		if err != nil {
+			preview := truncateResponse(string(byteData))
+			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to parse api response as json (status %d). this may indicate a gateway or proxy error. response: %s", resp.StatusCode, preview)}
+		}
+
+		// Check API level error
+		data := jsonResponse["data"]
+		apiErr := jsonResponse["error"]
+
+		if data == nil && apiErr != nil {
+			return nil, &RuntimeError{fmt.Sprintf("lingo: %s", apiErr)}
+		}
+
+		// Return data field
+		return data, nil
 	}
 
-	// Parse JSON from same byteData
-
-	var jsonResponse map[string]any
-
-	err = json.Unmarshal(byteData, &jsonResponse)
-	if err != nil {
-		preview := truncateResponse(string(byteData))
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to parse api response as json (status %d). this may indicate a gateway or proxy error. response: %s ", resp.StatusCode, preview)}
-	}
-
-	// Check API level error
-	data := jsonResponse["data"]
-	apiErr := jsonResponse["error"]
-
-	if data == nil && apiErr != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: %s", apiErr)}
-	}
-
-	// Return data field
-	return data, nil
-
+	return nil, lastErr
 }
 
 func countWords(payload any) int {
@@ -152,4 +150,62 @@ func countWords(payload any) int {
 	default:
 		return 0
 	}
+}
+
+func (c *Client) extractChunks(payload map[string]any) []map[string]any {
+	total := len(payload)
+	processed := 0
+	var result []map[string]any
+	currentChunk := make(map[string]any)
+	var currentItemCount int
+
+	for key, value := range payload {
+		currentChunk[key] = value
+		currentItemCount++
+		currentChunkSize := countWords(currentChunk)
+		processed++
+
+		if currentChunkSize > c.config.IdealBatchItemSize || currentItemCount >= c.config.BatchSize || processed == total {
+			result = append(result, currentChunk)
+			currentChunk = make(map[string]any)
+			currentItemCount = 0
+		}
+	}
+
+	return result
+}
+
+func (c *Client) localizeChunk(sourceLocale *string, workflowID, targetLocale string, payload map[string]any, fast bool) (any, error) {
+	endpoint, err := url.JoinPath(c.config.APIURL, "/i18n")
+	if err != nil {
+		return nil, &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
+	}
+
+	requestData := &RequestData{
+		Param: parameter{
+			WorkflowID: workflowID,
+			Fast:       fast,
+		},
+		Locale: locale{
+			Source: sourceLocale,
+			Target: targetLocale,
+		},
+		Data: payload["data"],
+	}
+
+	if raw, ok := payload["reference"]; ok {
+		ref, ok := raw.(map[string]map[string]any)
+		if !ok {
+			return nil, &ValueError{"lingo: reference has invalid type"}
+		}
+		requestData.Reference = ref
+	}
+
+	data, err := c.do(endpoint, requestData)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
