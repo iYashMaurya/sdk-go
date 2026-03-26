@@ -10,7 +10,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
+func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
 	chunks := c.extractChunks(payload)
 	if len(chunks) == 0 {
 		return map[string]any{}, nil
@@ -30,7 +30,7 @@ func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, 
 
 	if concurrent {
 		var mu sync.Mutex
-		g, ctx := errgroup.WithContext(context.Background())
+		g, gCtx := errgroup.WithContext(ctx)
 
 		for _, chunk := range chunks {
 			chunkPayload := map[string]any{"data": chunk}
@@ -39,7 +39,7 @@ func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, 
 			}
 
 			g.Go(func() error {
-				result, err := c.localizeChunk(ctx, params.SourceLocale, workflowID, params.TargetLocale, chunkPayload, fast)
+				result, err := c.localizeChunk(gCtx, params.SourceLocale, workflowID, params.TargetLocale, chunkPayload, fast)
 				if err != nil {
 					return err
 				}
@@ -63,7 +63,6 @@ func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, 
 			return nil, err
 		}
 	} else {
-		ctx := context.Background()
 		for _, chunk := range chunks {
 			chunkPayload := map[string]any{"data": chunk}
 			if params.Reference != nil {
@@ -90,14 +89,14 @@ func (c *Client) localizeRaw(payload map[string]any, params LocalizationParams, 
 }
 
 // LocalizeText translates a single text string to the target locale specified in params.
-func (c *Client) LocalizeText(text string, params LocalizationParams) (string, error) {
+func (c *Client) LocalizeText(ctx context.Context, text string, params LocalizationParams) (string, error) {
 	if text == "" {
 		return "", &ValueError{"lingo: text must not be empty"}
 	}
 
 	payload := map[string]any{"text": text}
 
-	result, err := c.localizeRaw(payload, params, false)
+	result, err := c.localizeRaw(ctx, payload, params, false)
 	if err != nil {
 		return "", err
 	}
@@ -111,12 +110,12 @@ func (c *Client) LocalizeText(text string, params LocalizationParams) (string, e
 }
 
 // LocalizeObject translates all string values in the given map to the target locale specified in params.
-func (c *Client) LocalizeObject(obj map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
-	return c.localizeRaw(obj, params, concurrent)
+func (c *Client) LocalizeObject(ctx context.Context, obj map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
+	return c.localizeRaw(ctx, obj, params, concurrent)
 }
 
 // LocalizeChat translates the text field of each chat message to the target locale specified in params.
-func (c *Client) LocalizeChat(chat []map[string]string, params LocalizationParams) ([]map[string]string, error) {
+func (c *Client) LocalizeChat(ctx context.Context, chat []map[string]string, params LocalizationParams) ([]map[string]string, error) {
 	if len(chat) == 0 {
 		return []map[string]string{}, nil
 	}
@@ -139,7 +138,7 @@ func (c *Client) LocalizeChat(chat []map[string]string, params LocalizationParam
 	}
 	payload := map[string]any{"chat": chatPayload}
 
-	result, err := c.localizeRaw(payload, params, false)
+	result, err := c.localizeRaw(ctx, payload, params, false)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +176,7 @@ func (c *Client) LocalizeChat(chat []map[string]string, params LocalizationParam
 }
 
 // RecognizeLocale detects the locale of the given text.
-func (c *Client) RecognizeLocale(text string) (string, error) {
+func (c *Client) RecognizeLocale(ctx context.Context, text string) (string, error) {
 	if text == "" {
 		return "", &ValueError{"lingo: text must not be empty"}
 	}
@@ -189,7 +188,7 @@ func (c *Client) RecognizeLocale(text string) (string, error) {
 
 	requestData := map[string]any{"text": text}
 
-	data, err := c.do(context.Background(), endpoint, requestData)
+	data, err := c.do(ctx, endpoint, requestData)
 	if err != nil {
 		return "", err
 	}
@@ -208,13 +207,13 @@ func (c *Client) RecognizeLocale(text string) (string, error) {
 }
 
 // WhoAmI returns the authenticated user's information, or nil if not authenticated.
-func (c *Client) WhoAmI() (map[string]string, error) {
+func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 	endpoint, err := url.JoinPath(c.config.APIURL, "/whoami")
 	if err != nil {
 		return nil, &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
 	}
 
-	data, err := c.do(context.Background(), endpoint, map[string]any{})
+	data, err := c.do(ctx, endpoint, map[string]any{})
 	if err != nil {
 		return nil, err
 	}
@@ -238,4 +237,72 @@ func (c *Client) WhoAmI() (map[string]string, error) {
 	}
 
 	return result, nil
+}
+
+// BatchLocalizeText translates a single text string into multiple target locales concurrently.
+func (c *Client) BatchLocalizeText(text string, sourceLocale *string, fast *bool, targetLocales []string) ([]string, error) {
+	if text == "" {
+		return nil, &ValueError{"lingo: text must not be empty"}
+	}
+	if len(targetLocales) == 0 {
+		return []string{}, nil
+	}
+
+	results := make([]string, len(targetLocales))
+	g, ctx := errgroup.WithContext(context.Background())
+
+	for i, targetLocale := range targetLocales {
+		params := LocalizationParams{
+			SourceLocale: sourceLocale,
+			TargetLocale: targetLocale,
+			Fast:         fast,
+		}
+		g.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			localized, err := c.LocalizeText(ctx, text, params)
+			if err != nil {
+				return err
+			}
+			results[i] = localized
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// BatchLocalizeObjects translates multiple objects concurrently using the same localization params.
+func (c *Client) BatchLocalizeObjects(objects []map[string]any, params LocalizationParams) ([]map[string]any, error) {
+	if len(objects) == 0 {
+		return []map[string]any{}, nil
+	}
+
+	results := make([]map[string]any, len(objects))
+	g, ctx := errgroup.WithContext(context.Background())
+
+	for i, obj := range objects {
+		g.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			localized, err := c.LocalizeObject(ctx, obj, params, false)
+			if err != nil {
+				return err
+			}
+			results[i] = localized
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
 }
