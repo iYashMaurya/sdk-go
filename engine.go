@@ -2,7 +2,9 @@ package lingo
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sync"
 
@@ -11,14 +13,14 @@ import (
 )
 
 func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
-	chunks := c.extractChunks(payload)
+	chunks := c.ExtractChunks(payload)
 	if len(chunks) == 0 {
 		return map[string]any{}, nil
 	}
 
 	workflowID, err := gonanoid.New()
 	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to generate workflow id: %s", err)}
+		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: failed to generate workflow id: %s", err)}
 	}
 
 	fast := false
@@ -46,7 +48,7 @@ func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params
 
 				resultMap, ok := result.(map[string]any)
 				if !ok {
-					return &RuntimeError{"lingo: unexpected response type from server"}
+					return &RuntimeError{Message: "lingo: unexpected response type from server"}
 				}
 
 				mu.Lock()
@@ -76,7 +78,7 @@ func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params
 
 			resultMap, ok := result.(map[string]any)
 			if !ok {
-				return nil, &RuntimeError{"lingo: unexpected response type from server"}
+				return nil, &RuntimeError{Message: "lingo: unexpected response type from server"}
 			}
 
 			for k, v := range resultMap {
@@ -103,7 +105,7 @@ func (c *Client) LocalizeText(ctx context.Context, text string, params Localizat
 
 	localized, ok := result["text"].(string)
 	if !ok {
-		return "", &RuntimeError{"lingo: unexpected response type for localized text"}
+		return "", &RuntimeError{Message: "lingo: unexpected response type for localized text"}
 	}
 
 	return localized, nil
@@ -145,26 +147,26 @@ func (c *Client) LocalizeChat(ctx context.Context, chat []map[string]string, par
 
 	rawChat, ok := result["chat"].([]any)
 	if !ok {
-		return nil, &RuntimeError{"lingo: unexpected response type for localized chat"}
+		return nil, &RuntimeError{Message: "lingo: unexpected response type for localized chat"}
 	}
 
 	if len(rawChat) != len(chat) {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: expected %d chat messages but got %d", len(chat), len(rawChat))}
+		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: expected %d chat messages but got %d", len(chat), len(rawChat))}
 	}
 
 	localized := make([]map[string]string, len(rawChat))
 	for i, item := range rawChat {
 		msgMap, ok := item.(map[string]any)
 		if !ok {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: unexpected response type for chat message at index %d", i)}
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message at index %d", i)}
 		}
 		name, ok := msgMap["name"].(string)
 		if !ok {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: unexpected response type for chat message name at index %d", i)}
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message name at index %d", i)}
 		}
 		text, ok := msgMap["text"].(string)
 		if !ok {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: unexpected response type for chat message text at index %d", i)}
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message text at index %d", i)}
 		}
 		localized[i] = map[string]string{
 			"name": name,
@@ -183,7 +185,7 @@ func (c *Client) RecognizeLocale(ctx context.Context, text string) (string, erro
 
 	endpoint, err := url.JoinPath(c.config.APIURL, "/recognize")
 	if err != nil {
-		return "", &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
+		return "", &RuntimeError{Message: fmt.Sprintf("lingo: unable to join path: %s", err)}
 	}
 
 	requestData := map[string]any{"text": text}
@@ -195,12 +197,12 @@ func (c *Client) RecognizeLocale(ctx context.Context, text string) (string, erro
 
 	dataMap, ok := data.(map[string]any)
 	if !ok {
-		return "", &RuntimeError{"lingo: unexpected response type for recognized locale"}
+		return "", &RuntimeError{Message: "lingo: unexpected response type for recognized locale"}
 	}
 
 	locale, ok := dataMap["locale"].(string)
 	if !ok {
-		return "", &RuntimeError{"lingo: missing locale field in response"}
+		return "", &RuntimeError{Message: "lingo: missing locale field in response"}
 	}
 
 	return locale, nil
@@ -210,11 +212,15 @@ func (c *Client) RecognizeLocale(ctx context.Context, text string) (string, erro
 func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 	endpoint, err := url.JoinPath(c.config.APIURL, "/whoami")
 	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
+		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unable to join path: %s", err)}
 	}
 
 	data, err := c.do(ctx, endpoint, map[string]any{})
 	if err != nil {
+		var re *RuntimeError
+		if errors.As(err, &re) && re.StatusCode == http.StatusUnauthorized {
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -224,7 +230,7 @@ func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 
 	dataMap, ok := data.(map[string]any)
 	if !ok {
-		return nil, &RuntimeError{"lingo: unexpected response type for whoami"}
+		return nil, &RuntimeError{Message: "lingo: unexpected response type for whoami"}
 	}
 
 	result := make(map[string]string, len(dataMap))
@@ -240,7 +246,7 @@ func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 }
 
 // BatchLocalizeText translates a single text string into multiple target locales concurrently.
-func (c *Client) BatchLocalizeText(text string, sourceLocale *string, fast *bool, targetLocales []string) ([]string, error) {
+func (c *Client) BatchLocalizeText(ctx context.Context, text string, sourceLocale *string, fast *bool, targetLocales []string) ([]string, error) {
 	if text == "" {
 		return nil, &ValueError{"lingo: text must not be empty"}
 	}
@@ -249,7 +255,7 @@ func (c *Client) BatchLocalizeText(text string, sourceLocale *string, fast *bool
 	}
 
 	results := make([]string, len(targetLocales))
-	g, ctx := errgroup.WithContext(context.Background())
+	g, gCtx := errgroup.WithContext(ctx)
 
 	for i, targetLocale := range targetLocales {
 		params := LocalizationParams{
@@ -258,10 +264,10 @@ func (c *Client) BatchLocalizeText(text string, sourceLocale *string, fast *bool
 			Fast:         fast,
 		}
 		g.Go(func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if gCtx.Err() != nil {
+				return gCtx.Err()
 			}
-			localized, err := c.LocalizeText(ctx, text, params)
+			localized, err := c.LocalizeText(gCtx, text, params)
 			if err != nil {
 				return err
 			}
@@ -278,20 +284,20 @@ func (c *Client) BatchLocalizeText(text string, sourceLocale *string, fast *bool
 }
 
 // BatchLocalizeObjects translates multiple objects concurrently using the same localization params.
-func (c *Client) BatchLocalizeObjects(objects []map[string]any, params LocalizationParams) ([]map[string]any, error) {
+func (c *Client) BatchLocalizeObjects(ctx context.Context, objects []map[string]any, params LocalizationParams) ([]map[string]any, error) {
 	if len(objects) == 0 {
 		return []map[string]any{}, nil
 	}
 
 	results := make([]map[string]any, len(objects))
-	g, ctx := errgroup.WithContext(context.Background())
+	g, gCtx := errgroup.WithContext(ctx)
 
 	for i, obj := range objects {
 		g.Go(func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if gCtx.Err() != nil {
+				return gCtx.Err()
 			}
-			localized, err := c.LocalizeObject(ctx, obj, params, false)
+			localized, err := c.LocalizeObject(gCtx, obj, params, false)
 			if err != nil {
 				return err
 			}

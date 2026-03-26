@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxLength = 200
+	MaxResponseLength = 200
 )
 
 type Client struct {
@@ -38,9 +38,10 @@ func NewClient(apiKey string, opts ...ConfigOption) (*Client, error) {
 	return c, nil
 }
 
-func truncateResponse(text string) string {
-	if len(text) > maxLength {
-		return text[:maxLength] + "..."
+// TruncateResponse truncates text to MaxResponseLength, appending "..." if truncated.
+func TruncateResponse(text string) string {
+	if len(text) > MaxResponseLength {
+		return text[:MaxResponseLength] + "..."
 	}
 	return text
 }
@@ -49,7 +50,7 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 	// Marshall data
 	dataByte, err := json.Marshal(requestData)
 	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: failed to marshall request data: %s", err)}
+		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: failed to marshall request data: %s", err)}
 	}
 
 	const maxRetries = 3
@@ -63,7 +64,7 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 		// Create HTTP request
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(dataByte))
 		if err != nil {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to create a new request: %s", err)}
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: failed to create a new request: %s", err)}
 		}
 
 		// Set headers
@@ -74,7 +75,7 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 		// Execute request
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
-			lastErr = &RuntimeError{fmt.Sprintf("lingo: failed to send the http request to the server: %s", err)}
+			lastErr = &RuntimeError{Message: fmt.Sprintf("lingo: failed to send the http request to the server: %s", err)}
 			continue
 		}
 
@@ -82,12 +83,12 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 		byteData, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to read response body: %s", err)}
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: failed to read response body: %s", err)}
 		}
 
 		// Check Status Code
 		if resp.StatusCode != http.StatusOK {
-			responsePreview := truncateResponse(string(byteData))
+			responsePreview := TruncateResponse(string(byteData))
 
 			parts := strings.SplitN(resp.Status, " ", 2)
 
@@ -98,12 +99,12 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 			}
 
 			if resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode < 600 {
-				lastErr = &RuntimeError{fmt.Sprintf("lingo: server error %d : %s. this may be due to temporary service issues. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
+				lastErr = &RuntimeError{Message: fmt.Sprintf("lingo: server error %d : %s. this may be due to temporary service issues. response: %s", resp.StatusCode, reasonPhrase, responsePreview), StatusCode: resp.StatusCode}
 				continue
 			} else if resp.StatusCode == http.StatusBadRequest {
 				return nil, &ValueError{fmt.Sprintf("lingo: invalid request (%d): %s. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
 			} else {
-				return nil, &RuntimeError{fmt.Sprintf("lingo: request failed (%d): %s.", resp.StatusCode, responsePreview)}
+				return nil, &RuntimeError{Message: fmt.Sprintf("lingo: request failed (%d): %s.", resp.StatusCode, responsePreview), StatusCode: resp.StatusCode}
 			}
 		}
 
@@ -113,8 +114,8 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 
 		err = json.Unmarshal(byteData, &jsonResponse)
 		if err != nil {
-			preview := truncateResponse(string(byteData))
-			return nil, &RuntimeError{fmt.Sprintf("lingo: failed to parse api response as json (status %d). this may indicate a gateway or proxy error. response: %s", resp.StatusCode, preview)}
+			preview := TruncateResponse(string(byteData))
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: failed to parse api response as json (status %d). this may indicate a gateway or proxy error. response: %s", resp.StatusCode, preview), StatusCode: resp.StatusCode}
 		}
 
 		// Check API level error
@@ -122,7 +123,7 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 		apiErr := jsonResponse["error"]
 
 		if data == nil && apiErr != nil {
-			return nil, &RuntimeError{fmt.Sprintf("lingo: %s", apiErr)}
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: %s", apiErr)}
 		}
 
 		// Return data field
@@ -132,18 +133,19 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 	return nil, lastErr
 }
 
-func countWords(payload any) int {
+// CountWords counts the total number of words in the given payload recursively.
+func CountWords(payload any) int {
 	switch v := payload.(type) {
 	case []any:
 		total := 0
 		for _, item := range v {
-			total += countWords(item)
+			total += CountWords(item)
 		}
 		return total
 	case map[string]any:
 		total := 0
 		for _, value := range v {
-			total += countWords(value)
+			total += CountWords(value)
 		}
 		return total
 	case string:
@@ -153,7 +155,8 @@ func countWords(payload any) int {
 	}
 }
 
-func (c *Client) extractChunks(payload map[string]any) []map[string]any {
+// ExtractChunks splits a payload map into smaller chunks based on configured batch size and ideal item size.
+func (c *Client) ExtractChunks(payload map[string]any) []map[string]any {
 	total := len(payload)
 	processed := 0
 	var result []map[string]any
@@ -163,7 +166,7 @@ func (c *Client) extractChunks(payload map[string]any) []map[string]any {
 	for key, value := range payload {
 		currentChunk[key] = value
 		currentItemCount++
-		currentChunkSize := countWords(currentChunk)
+		currentChunkSize := CountWords(currentChunk)
 		processed++
 
 		if currentChunkSize > c.config.IdealBatchItemSize || currentItemCount >= c.config.BatchSize || processed == total {
@@ -179,7 +182,7 @@ func (c *Client) extractChunks(payload map[string]any) []map[string]any {
 func (c *Client) localizeChunk(ctx context.Context, sourceLocale *string, workflowID, targetLocale string, payload map[string]any, fast bool) (any, error) {
 	endpoint, err := url.JoinPath(c.config.APIURL, "/i18n")
 	if err != nil {
-		return nil, &RuntimeError{fmt.Sprintf("lingo: unable to join path: %s", err)}
+		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unable to join path: %s", err)}
 	}
 
 	requestData := &RequestData{
