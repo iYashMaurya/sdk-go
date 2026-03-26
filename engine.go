@@ -112,3 +112,64 @@ func (c *Client) LocalizeText(text string, params LocalizationParams) (string, e
 func (c *Client) LocalizeObject(obj map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
 	return c.localizeRaw(obj, params, concurrent)
 }
+
+// LocalizeChat translates the text field of each chat message to the target locale specified in params.
+func (c *Client) LocalizeChat(chat []map[string]string, params LocalizationParams) ([]map[string]string, error) {
+	if len(chat) == 0 {
+		return []map[string]string{}, nil
+	}
+
+	for i, msg := range chat {
+		if _, ok := msg["name"]; !ok {
+			return nil, &ValueError{fmt.Sprintf("lingo: chat message at index %d is missing 'name' field", i)}
+		}
+		if _, ok := msg["text"]; !ok {
+			return nil, &ValueError{fmt.Sprintf("lingo: chat message at index %d is missing 'text' field", i)}
+		}
+	}
+
+	chatPayload := make([]any, len(chat))
+	for i, msg := range chat {
+		chatPayload[i] = map[string]any{
+			"name": msg["name"],
+			"text": msg["text"],
+		}
+	}
+	payload := map[string]any{"chat": chatPayload}
+
+	result, err := c.localizeRaw(payload, params, false)
+	if err != nil {
+		return nil, err
+	}
+
+	rawChat, ok := result["chat"].([]any)
+	if !ok {
+		return nil, &RuntimeError{"lingo: unexpected response type for localized chat"}
+	}
+
+	if len(rawChat) != len(chat) {
+		return nil, &RuntimeError{fmt.Sprintf("lingo: expected %d chat messages but got %d", len(chat), len(rawChat))}
+	}
+
+	localized := make([]map[string]string, len(rawChat))
+	for i, item := range rawChat {
+		msgMap, ok := item.(map[string]any)
+		if !ok {
+			return nil, &RuntimeError{fmt.Sprintf("lingo: unexpected response type for chat message at index %d", i)}
+		}
+		name, ok := msgMap["name"].(string)
+		if !ok {
+			return nil, &RuntimeError{fmt.Sprintf("lingo: unexpected response type for chat message name at index %d", i)}
+		}
+		text, ok := msgMap["text"].(string)
+		if !ok {
+			return nil, &RuntimeError{fmt.Sprintf("lingo: unexpected response type for chat message text at index %d", i)}
+		}
+		localized[i] = map[string]string{
+			"name": name,
+			"text": text,
+		}
+	}
+
+	return localized, nil
+}
