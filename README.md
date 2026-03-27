@@ -545,4 +545,4 @@ Apache-2.0 License
 
 - 📚 [Documentation](https://lingo.dev/docs)
 - 🐛 [Issues](https://github.com/lingodotdev/sdk-go/issues)
-- 💬 [Community](https://lingo.dev/discord)
+- 💬 [Community](https://discord.com/invite/rJ8zGYJQj5)
