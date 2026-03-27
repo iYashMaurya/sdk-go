@@ -1,0 +1,60 @@
+name: Pull Request
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test Go ${{ matrix.go-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.21', '1.22']
+    env:
+      LINGODOTDEV_API_KEY: ${{ secrets.LINGODOTDEV_API_KEY }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go ${{ matrix.go-version }}
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod tidy
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Build
+      run: make build
+
+    - name: Vet
+      run: make vet
+
+    - name: Format check
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "The following files are not formatted:"
+          gofmt -l .
+          exit 1
+        fi
+
+    - name: Unit tests with coverage
+      run: go test ./tests/... -run "^Test[^R]" -v -count=1 -timeout 60s -coverprofile=coverage.out
+
+    - name: Upload coverage
+      if: matrix.go-version == '1.22'
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        flags: unittests
+        fail_ci_if_error: false
+
+    - name: Integration tests
+      if: env.LINGODOTDEV_API_KEY != ''
+      run: make test-integration
