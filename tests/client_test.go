@@ -13,8 +13,6 @@ import (
 	lingo "github.com/lingodotdev/sdk-go"
 )
 
-// --- CONFIG TESTS ---
-
 func TestNewClient_MissingAPIKey(t *testing.T) {
 	_, err := lingo.NewClient("")
 	if err == nil {
@@ -87,8 +85,6 @@ func TestNewClient_InvalidIdealBatchItemSize(t *testing.T) {
 	}
 }
 
-// --- WORD COUNT TESTS ---
-
 func TestCountWords(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -113,8 +109,6 @@ func TestCountWords(t *testing.T) {
 		})
 	}
 }
-
-// --- CHUNK TESTS ---
 
 func TestExtractChunks_RespectsItemLimit(t *testing.T) {
 	client, err := lingo.NewClient("test-key", lingo.SetBatchSize(2))
@@ -182,8 +176,6 @@ func TestExtractChunks_EmptyPayload(t *testing.T) {
 		t.Errorf("expected 0 chunks for empty payload, got %d", len(chunks))
 	}
 }
-
-// --- LOCALIZE TEXT TESTS ---
 
 func TestLocalizeText_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -347,8 +339,6 @@ func TestLocalizeText_StreamingError(t *testing.T) {
 	}
 }
 
-// --- LOCALIZE CHAT TESTS ---
-
 func TestLocalizeChat_Success(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -491,8 +481,6 @@ func TestLocalizeChat_ResponseLengthMismatch(t *testing.T) {
 		t.Errorf("expected error about message count mismatch, got: %s", re.Message)
 	}
 }
-
-// --- BATCH TESTS ---
 
 func TestBatchLocalizeText_EmptyLocales(t *testing.T) {
 	client, err := lingo.NewClient("test-key")
@@ -670,8 +658,6 @@ func TestWhoAmI_ServerError(t *testing.T) {
 	}
 }
 
-// --- RECOGNIZE LOCALE TESTS ---
-
 func TestRecognizeLocale_EmptyText(t *testing.T) {
 	client, err := lingo.NewClient("test-key")
 	if err != nil {
@@ -711,7 +697,7 @@ func TestRecognizeLocale_Success(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"data": map[string]any{"locale": "en"},
+			"locale": "en",
 		})
 	}))
 	defer server.Close()
@@ -754,8 +740,6 @@ func TestRecognizeLocale_ServerError(t *testing.T) {
 		t.Errorf("expected error about server error, got: %s", re.Message)
 	}
 }
-
-// --- UTILITY TESTS ---
 
 func TestTruncateResponse_Short(t *testing.T) {
 	short := "hello"

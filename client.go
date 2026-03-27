@@ -46,7 +46,7 @@ func TruncateResponse(text string) string {
 	return text
 }
 
-func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any, error) {
+func (c *Client) do(ctx context.Context, endpoint string, requestData any) (map[string]any, error) {
 	// Marshall data
 	dataByte, err := json.Marshal(requestData)
 	if err != nil {
@@ -119,15 +119,11 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (any,
 		}
 
 		// Check API level error
-		data := jsonResponse["data"]
-		apiErr := jsonResponse["error"]
-
-		if data == nil && apiErr != nil {
-			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: %s", apiErr)}
+		if jsonResponse["error"] != nil {
+			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: %s", jsonResponse["error"])}
 		}
 
-		// Return data field
-		return data, nil
+		return jsonResponse, nil
 	}
 
 	return nil, lastErr
@@ -205,11 +201,10 @@ func (c *Client) localizeChunk(ctx context.Context, sourceLocale *string, workfl
 		requestData.Reference = ref
 	}
 
-	data, err := c.do(ctx, endpoint, requestData)
-
+	result, err := c.do(ctx, endpoint, requestData)
 	if err != nil {
 		return nil, err
 	}
 
-	return data, nil
+	return result["data"], nil
 }

@@ -190,17 +190,12 @@ func (c *Client) RecognizeLocale(ctx context.Context, text string) (string, erro
 
 	requestData := map[string]any{"text": text}
 
-	data, err := c.do(ctx, endpoint, requestData)
+	result, err := c.do(ctx, endpoint, requestData)
 	if err != nil {
 		return "", err
 	}
 
-	dataMap, ok := data.(map[string]any)
-	if !ok {
-		return "", &RuntimeError{Message: "lingo: unexpected response type for recognized locale"}
-	}
-
-	locale, ok := dataMap["locale"].(string)
+	locale, ok := result["locale"].(string)
 	if !ok {
 		return "", &RuntimeError{Message: "lingo: missing locale field in response"}
 	}
@@ -215,7 +210,7 @@ func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unable to join path: %s", err)}
 	}
 
-	data, err := c.do(ctx, endpoint, map[string]any{})
+	result, err := c.do(ctx, endpoint, map[string]any{})
 	if err != nil {
 		var re *RuntimeError
 		if errors.As(err, &re) && re.StatusCode == http.StatusUnauthorized {
@@ -224,6 +219,7 @@ func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 		return nil, err
 	}
 
+	data := result["data"]
 	if data == nil {
 		return nil, nil
 	}
@@ -233,16 +229,16 @@ func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 		return nil, &RuntimeError{Message: "lingo: unexpected response type for whoami"}
 	}
 
-	result := make(map[string]string, len(dataMap))
+	info := make(map[string]string, len(dataMap))
 	for k, v := range dataMap {
 		str, ok := v.(string)
 		if !ok {
 			continue
 		}
-		result[k] = str
+		info[k] = str
 	}
 
-	return result, nil
+	return info, nil
 }
 
 // BatchLocalizeText translates a single text string into multiple target locales concurrently.
