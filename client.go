@@ -63,7 +63,14 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (map[
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(1<<uint(attempt-1)) * time.Second)
+			delay := time.Duration(1<<uint(attempt-1)) * time.Second
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, &RuntimeError{Message: fmt.Sprintf("lingo: request cancelled: %s", ctx.Err())}
+			case <-timer.C:
+			}
 		}
 
 		// Create HTTP request
@@ -80,6 +87,9 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (map[
 		// Execute request
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil, &RuntimeError{Message: fmt.Sprintf("lingo: request cancelled: %s", ctx.Err())}
+			}
 			lastErr = &RuntimeError{Message: fmt.Sprintf("lingo: failed to send the http request to the server: %s", err)}
 			continue
 		}
@@ -143,10 +153,22 @@ func CountWords(payload any) int {
 			total += CountWords(item)
 		}
 		return total
+	case []string:
+		total := 0
+		for _, s := range v {
+			total += len(strings.Fields(s))
+		}
+		return total
 	case map[string]any:
 		total := 0
 		for _, value := range v {
 			total += CountWords(value)
+		}
+		return total
+	case map[string]string:
+		total := 0
+		for _, s := range v {
+			total += len(strings.Fields(s))
 		}
 		return total
 	case string:

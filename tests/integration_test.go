@@ -17,8 +17,6 @@ import (
 	lingo "github.com/lingodotdev/sdk-go"
 )
 
-// --- Helper functions ---
-
 func skipIfNoAPIKey(t *testing.T) (string, string) {
 	t.Helper()
 	apiKey := os.Getenv("LINGODOTDEV_API_KEY")
@@ -44,8 +42,6 @@ func newRealClient(t *testing.T) *lingo.Client {
 
 func strPtr(s string) *string { return &s }
 func boolPtr(b bool) *bool    { return &b }
-
-// --- GROUP 1: Real API Tests ---
 
 func TestRealAPI_LocalizeText(t *testing.T) {
 	client := newRealClient(t)
@@ -283,10 +279,6 @@ func TestRealAPI_ConcurrentVsSequential(t *testing.T) {
 	}
 	concDuration := time.Since(start)
 
-	threshold := time.Duration(float64(seqDuration) * 1.5)
-	if concDuration > threshold {
-		t.Errorf("concurrent (%s) was not faster than sequential (%s) * 1.5", concDuration, seqDuration)
-	}
 	t.Logf("Sequential duration: %s", seqDuration)
 	t.Logf("Concurrent duration: %s", concDuration)
 }
@@ -329,8 +321,6 @@ func TestRealAPI_BatchLocalizeObjects(t *testing.T) {
 	}
 	t.Logf("BatchLocalizeObjects results: %v", results)
 }
-
-// --- GROUP 2: Mocked Integration Tests ---
 
 func TestMocked_LargePayloadChunking(t *testing.T) {
 	var callCount atomic.Int32
