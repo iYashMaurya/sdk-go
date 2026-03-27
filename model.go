@@ -1,5 +1,7 @@
 package lingo
 
+// LocalizationParams contains parameters for a localization request.
+// SourceLocale and Fast are optional pointer types — pass nil to use API defaults.
 type LocalizationParams struct {
 	SourceLocale *string                   `json:"source_locale,omitempty"`
 	TargetLocale string                    `json:"target_locale"`
@@ -7,7 +9,7 @@ type LocalizationParams struct {
 	Reference    map[string]map[string]any `json:"reference,omitempty"`
 }
 
-type RequestData struct {
+type requestData struct {
 	Param     parameter                 `json:"params"`
 	Locale    locale                    `json:"locale"`
 	Data      any                       `json:"data"`

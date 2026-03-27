@@ -12,6 +12,8 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// localizeRaw splits payload into chunks and localizes each chunk,
+// either sequentially or concurrently based on the concurrent flag.
 func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params LocalizationParams, concurrent bool) (map[string]any, error) {
 	chunks := c.ExtractChunks(payload)
 	if len(chunks) == 0 {
@@ -93,7 +95,7 @@ func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params
 // LocalizeText translates a single text string to the target locale specified in params.
 func (c *Client) LocalizeText(ctx context.Context, text string, params LocalizationParams) (string, error) {
 	if text == "" {
-		return "", &ValueError{"lingo: text must not be empty"}
+		return "", &ValueError{Message: "lingo: text must not be empty"}
 	}
 
 	payload := map[string]any{"text": text}
@@ -124,10 +126,10 @@ func (c *Client) LocalizeChat(ctx context.Context, chat []map[string]string, par
 
 	for i, msg := range chat {
 		if _, ok := msg["name"]; !ok {
-			return nil, &ValueError{fmt.Sprintf("lingo: chat message at index %d is missing 'name' field", i)}
+			return nil, &ValueError{Message: fmt.Sprintf("lingo: chat message at index %d is missing 'name' field", i)}
 		}
 		if _, ok := msg["text"]; !ok {
-			return nil, &ValueError{fmt.Sprintf("lingo: chat message at index %d is missing 'text' field", i)}
+			return nil, &ValueError{Message: fmt.Sprintf("lingo: chat message at index %d is missing 'text' field", i)}
 		}
 	}
 
@@ -180,7 +182,7 @@ func (c *Client) LocalizeChat(ctx context.Context, chat []map[string]string, par
 // RecognizeLocale detects the locale of the given text.
 func (c *Client) RecognizeLocale(ctx context.Context, text string) (string, error) {
 	if text == "" {
-		return "", &ValueError{"lingo: text must not be empty"}
+		return "", &ValueError{Message: "lingo: text must not be empty"}
 	}
 
 	endpoint, err := url.JoinPath(c.config.APIURL, "/recognize")
@@ -238,13 +240,17 @@ func (c *Client) WhoAmI(ctx context.Context) (map[string]string, error) {
 		info[k] = str
 	}
 
+	if len(info) == 0 {
+		return nil, nil
+	}
+
 	return info, nil
 }
 
 // BatchLocalizeText translates a single text string into multiple target locales concurrently.
 func (c *Client) BatchLocalizeText(ctx context.Context, text string, sourceLocale *string, fast *bool, targetLocales []string) ([]string, error) {
 	if text == "" {
-		return nil, &ValueError{"lingo: text must not be empty"}
+		return nil, &ValueError{Message: "lingo: text must not be empty"}
 	}
 	if len(targetLocales) == 0 {
 		return []string{}, nil
@@ -260,9 +266,6 @@ func (c *Client) BatchLocalizeText(ctx context.Context, text string, sourceLocal
 			Fast:         fast,
 		}
 		g.Go(func() error {
-			if gCtx.Err() != nil {
-				return gCtx.Err()
-			}
 			localized, err := c.LocalizeText(gCtx, text, params)
 			if err != nil {
 				return err
@@ -290,9 +293,6 @@ func (c *Client) BatchLocalizeObjects(ctx context.Context, objects []map[string]
 
 	for i, obj := range objects {
 		g.Go(func() error {
-			if gCtx.Err() != nil {
-				return gCtx.Err()
-			}
 			localized, err := c.LocalizeObject(gCtx, obj, params, false)
 			if err != nil {
 				return err

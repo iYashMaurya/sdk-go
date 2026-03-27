@@ -21,9 +21,11 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// NewClient creates a new Lingo.dev SDK client with the given API key.
+// Optional ConfigOption functions can be passed to override defaults.
 func NewClient(apiKey string, opts ...ConfigOption) (*Client, error) {
 	if apiKey == "" {
-		return nil, &ValueError{"lingo: api key is required"}
+		return nil, &ValueError{Message: "lingo: api key is required"}
 	}
 	config, err := newEngineConfig(apiKey, opts...)
 	if err != nil {
@@ -46,6 +48,9 @@ func TruncateResponse(text string) string {
 	return text
 }
 
+// do executes an authenticated POST request to the given endpoint,
+// retrying up to 3 times with exponential backoff on 5xx errors.
+// Returns the full parsed JSON response map.
 func (c *Client) do(ctx context.Context, endpoint string, requestData any) (map[string]any, error) {
 	// Marshall data
 	dataByte, err := json.Marshal(requestData)
@@ -102,7 +107,7 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (map[
 				lastErr = &RuntimeError{Message: fmt.Sprintf("lingo: server error %d : %s. this may be due to temporary service issues. response: %s", resp.StatusCode, reasonPhrase, responsePreview), StatusCode: resp.StatusCode}
 				continue
 			} else if resp.StatusCode == http.StatusBadRequest {
-				return nil, &ValueError{fmt.Sprintf("lingo: invalid request (%d): %s. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
+				return nil, &ValueError{Message: fmt.Sprintf("lingo: invalid request (%d): %s. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
 			} else {
 				return nil, &RuntimeError{Message: fmt.Sprintf("lingo: request failed (%d): %s.", resp.StatusCode, responsePreview), StatusCode: resp.StatusCode}
 			}
@@ -181,7 +186,7 @@ func (c *Client) localizeChunk(ctx context.Context, sourceLocale *string, workfl
 		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unable to join path: %s", err)}
 	}
 
-	requestData := &RequestData{
+	requestData := &requestData{
 		Param: parameter{
 			WorkflowID: workflowID,
 			Fast:       fast,
@@ -196,7 +201,7 @@ func (c *Client) localizeChunk(ctx context.Context, sourceLocale *string, workfl
 	if raw, ok := payload["reference"]; ok {
 		ref, ok := raw.(map[string]map[string]any)
 		if !ok {
-			return nil, &ValueError{"lingo: reference has invalid type"}
+			return nil, &ValueError{Message: "lingo: reference has invalid type"}
 		}
 		requestData.Reference = ref
 	}

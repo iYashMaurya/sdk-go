@@ -64,6 +64,23 @@ func main() {
 	}
 	fmt.Println()
 
+	// --- LocalizeChat ---
+	fmt.Println("=== LocalizeChat ===")
+	chat := []map[string]string{
+		{"name": "Alice", "text": "Hello everyone!"},
+		{"name": "Bob", "text": "How are you?"},
+	}
+	chatResult, err := client.LocalizeChat(ctx, chat, lingo.LocalizationParams{
+		TargetLocale: "es",
+	})
+	if err != nil {
+		log.Fatalf("LocalizeChat error: %s", err)
+	}
+	for _, msg := range chatResult {
+		fmt.Printf("  %s: %s\n", msg["name"], msg["text"])
+	}
+	fmt.Println()
+
 	// --- RecognizeLocale ---
 	fmt.Println("=== RecognizeLocale ===")
 	locale, err := client.RecognizeLocale(ctx, "Bonjour le monde")
