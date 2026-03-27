@@ -15,7 +15,7 @@ A production-grade Go SDK for the Lingo.dev localization engine. Supports text, 
 - 🎯 **Multiple content types** — text, key-value objects, chat messages
 - 🌐 **Auto-detection** of source languages
 - ⚡ **Fast mode** for quick translations when precision is less critical
-- � **Functional options** pattern for clean, extensible configuration
+- ⚙️ **Functional options** pattern for clean, extensible configuration
 
 ## 🚀 Performance Benefits
 
