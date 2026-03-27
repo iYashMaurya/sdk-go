@@ -119,7 +119,7 @@ func (c *Client) do(ctx context.Context, endpoint string, requestData any) (map[
 			} else if resp.StatusCode == http.StatusBadRequest {
 				return nil, &ValueError{Message: fmt.Sprintf("lingo: invalid request (%d): %s. response: %s", resp.StatusCode, reasonPhrase, responsePreview)}
 			} else {
-				return nil, &RuntimeError{Message: fmt.Sprintf("lingo: request failed (%d): %s.", resp.StatusCode, responsePreview), StatusCode: resp.StatusCode}
+				return nil, &RuntimeError{Message: fmt.Sprintf("lingo: request failed (%d): %s. response: %s", resp.StatusCode, reasonPhrase, responsePreview), StatusCode: resp.StatusCode}
 			}
 		}
 
