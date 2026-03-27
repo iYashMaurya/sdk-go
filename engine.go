@@ -37,6 +37,7 @@ func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params
 		g, gCtx := errgroup.WithContext(ctx)
 
 		for _, chunk := range chunks {
+			chunk := chunk
 			chunkPayload := map[string]any{"data": chunk}
 			if params.Reference != nil {
 				chunkPayload["reference"] = params.Reference
@@ -260,6 +261,7 @@ func (c *Client) BatchLocalizeText(ctx context.Context, text string, sourceLocal
 	g, gCtx := errgroup.WithContext(ctx)
 
 	for i, targetLocale := range targetLocales {
+		i, targetLocale := i, targetLocale
 		params := LocalizationParams{
 			SourceLocale: sourceLocale,
 			TargetLocale: targetLocale,
@@ -292,6 +294,7 @@ func (c *Client) BatchLocalizeObjects(ctx context.Context, objects []map[string]
 	g, gCtx := errgroup.WithContext(ctx)
 
 	for i, obj := range objects {
+		i, obj := i, obj
 		g.Go(func() error {
 			localized, err := c.LocalizeObject(gCtx, obj, params, false)
 			if err != nil {
