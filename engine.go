@@ -35,6 +35,7 @@ func (c *Client) localizeRaw(ctx context.Context, payload map[string]any, params
 	if concurrent {
 		var mu sync.Mutex
 		g, gCtx := errgroup.WithContext(ctx)
+		g.SetLimit(c.config.MaxConcurrency)
 
 		for _, chunk := range chunks {
 			chunk := chunk
@@ -121,6 +122,7 @@ func (c *Client) LocalizeObject(ctx context.Context, obj map[string]any, params 
 
 // LocalizeChat translates the text field of each chat message to the target locale specified in params.
 func (c *Client) LocalizeChat(ctx context.Context, chat []map[string]string, params LocalizationParams) ([]map[string]string, error) {
+
 	if len(chat) == 0 {
 		return []map[string]string{}, nil
 	}
@@ -141,40 +143,118 @@ func (c *Client) LocalizeChat(ctx context.Context, chat []map[string]string, par
 			"text": msg["text"],
 		}
 	}
-	payload := map[string]any{"chat": chatPayload}
 
-	result, err := c.localizeRaw(ctx, payload, params, false)
+	batchSize := c.config.BatchSize
+	if batchSize <= 0 {
+		batchSize = len(chatPayload)
+	}
+
+	type indexedResult struct {
+		startIdx int
+		messages []map[string]string
+	}
+
+	workflowID, err := gonanoid.New()
 	if err != nil {
+		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: failed to generate workflow id: %s", err)}
+	}
+
+	fast := false
+	if params.Fast != nil {
+		fast = *params.Fast
+	}
+
+	var subSlices [][]any
+	for i := 0; i < len(chatPayload); i += batchSize {
+		end := i + batchSize
+		if end > len(chatPayload) {
+			end = len(chatPayload)
+		}
+		subSlices = append(subSlices, chatPayload[i:end])
+	}
+
+	results := make([]indexedResult, len(subSlices))
+	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(c.config.MaxConcurrency)
+
+	for idx, sub := range subSlices {
+		idx, sub := idx, sub
+		startIdx := idx * batchSize
+
+		g.Go(func() error {
+			endpoint, err := url.JoinPath(c.config.APIURL, "/i18n")
+			if err != nil {
+				return &RuntimeError{Message: fmt.Sprintf("lingo: unable to join path: %s", err)}
+			}
+
+			requestData := &requestData{
+				Param: parameter{
+					WorkflowID: workflowID,
+					Fast:       fast,
+				},
+				Locale: locale{
+					Source: params.SourceLocale,
+					Target: params.TargetLocale,
+				},
+				Data: map[string]any{"chat": sub},
+			}
+
+			raw, err := c.do(gCtx, endpoint, requestData)
+			if err != nil {
+				return err
+			}
+
+			dataField, ok := raw["data"]
+			if !ok {
+				return &RuntimeError{Message: "lingo: missing data field in chat response"}
+			}
+
+			dataMap, ok := dataField.(map[string]any)
+			if !ok {
+				return &RuntimeError{Message: "lingo: unexpected data type in chat response"}
+			}
+
+			rawChat, ok := dataMap["chat"].([]any)
+			if !ok {
+				return &RuntimeError{Message: "lingo: unexpected response type for localized chat"}
+			}
+
+			if len(rawChat) != len(sub) {
+				return &RuntimeError{Message: fmt.Sprintf("lingo: expected %d chat messages but got %d", len(sub), len(rawChat))}
+			}
+
+			localized := make([]map[string]string, len(rawChat))
+			for i, item := range rawChat {
+				msgMap, ok := item.(map[string]any)
+				if !ok {
+					return &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message at index %d", startIdx+i)}
+				}
+				name, ok := msgMap["name"].(string)
+				if !ok {
+					return &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message name at index %d", startIdx+i)}
+				}
+				text, ok := msgMap["text"].(string)
+				if !ok {
+					return &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message text at index %d", startIdx+i)}
+				}
+				localized[i] = map[string]string{
+					"name": name,
+					"text": text,
+				}
+			}
+
+			results[idx] = indexedResult{startIdx: startIdx, messages: localized}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 
-	rawChat, ok := result["chat"].([]any)
-	if !ok {
-		return nil, &RuntimeError{Message: "lingo: unexpected response type for localized chat"}
-	}
-
-	if len(rawChat) != len(chat) {
-		return nil, &RuntimeError{Message: fmt.Sprintf("lingo: expected %d chat messages but got %d", len(chat), len(rawChat))}
-	}
-
-	localized := make([]map[string]string, len(rawChat))
-	for i, item := range rawChat {
-		msgMap, ok := item.(map[string]any)
-		if !ok {
-			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message at index %d", i)}
-		}
-		name, ok := msgMap["name"].(string)
-		if !ok {
-			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message name at index %d", i)}
-		}
-		text, ok := msgMap["text"].(string)
-		if !ok {
-			return nil, &RuntimeError{Message: fmt.Sprintf("lingo: unexpected response type for chat message text at index %d", i)}
-		}
-		localized[i] = map[string]string{
-			"name": name,
-			"text": text,
-		}
+	localized := make([]map[string]string, len(chat))
+	for _, r := range results {
+		copy(localized[r.startIdx:], r.messages)
 	}
 
 	return localized, nil
@@ -259,6 +339,7 @@ func (c *Client) BatchLocalizeText(ctx context.Context, text string, sourceLocal
 
 	results := make([]string, len(targetLocales))
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(c.config.MaxConcurrency)
 
 	for i, targetLocale := range targetLocales {
 		i, targetLocale := i, targetLocale
@@ -292,6 +373,7 @@ func (c *Client) BatchLocalizeObjects(ctx context.Context, objects []map[string]
 
 	results := make([]map[string]any, len(objects))
 	g, gCtx := errgroup.WithContext(ctx)
+	g.SetLimit(c.config.MaxConcurrency)
 
 	for i, obj := range objects {
 		i, obj := i, obj

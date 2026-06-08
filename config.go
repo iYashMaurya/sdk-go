@@ -10,10 +10,23 @@ type Config struct {
 	APIURL             string
 	BatchSize          int
 	IdealBatchItemSize int
+	MaxConcurrency     int
 }
 
 // ConfigOption is a function that configures the SDK client.
 type ConfigOption func(c *Config) error
+
+// SetMaxConcurrency sets the maximum number of goroutines that may issue HTTP
+// requests at the same time. Pass a value ≥ 1; values < 1 are ignored.
+func SetMaxConcurrency(n int) ConfigOption {
+	return func(c *Config) error {
+		if n < 1 {
+			return &ValueError{Message: "lingo: max concurrency must be >= 1"}
+		}
+		c.MaxConcurrency = n
+		return nil
+	}
+}
 
 // SetURL configures the API endpoint URL.
 // The URL must start with http:// or https://.
@@ -54,6 +67,7 @@ func newEngineConfig(apiKey string, opts ...ConfigOption) (*Config, error) {
 		defaultAPIURL             = "https://engine.lingo.dev"
 		defaultBatchSize          = 25
 		defaultIdealBatchItemSize = 250
+		defaultMaxConcurrency     = 10
 	)
 
 	c := &Config{
@@ -61,6 +75,7 @@ func newEngineConfig(apiKey string, opts ...ConfigOption) (*Config, error) {
 		APIURL:             defaultAPIURL,
 		BatchSize:          defaultBatchSize,
 		IdealBatchItemSize: defaultIdealBatchItemSize,
+		MaxConcurrency:     defaultMaxConcurrency,
 	}
 
 	for _, opt := range opts {

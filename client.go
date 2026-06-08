@@ -180,23 +180,30 @@ func CountWords(payload any) int {
 
 // ExtractChunks splits a payload map into smaller chunks based on configured batch size and ideal item size.
 func (c *Client) ExtractChunks(payload map[string]any) []map[string]any {
-	total := len(payload)
-	processed := 0
 	var result []map[string]any
 	currentChunk := make(map[string]any)
 	var currentItemCount int
+	var currentWordCount int
+
+	flush := func() {
+		result = append(result, currentChunk)
+		currentChunk = make(map[string]any)
+		currentItemCount = 0
+		currentWordCount = 0
+	}
 
 	for key, value := range payload {
 		currentChunk[key] = value
+		currentWordCount += CountWords(value)
 		currentItemCount++
-		currentChunkSize := CountWords(currentChunk)
-		processed++
 
-		if currentChunkSize > c.config.IdealBatchItemSize || currentItemCount >= c.config.BatchSize || processed == total {
-			result = append(result, currentChunk)
-			currentChunk = make(map[string]any)
-			currentItemCount = 0
+		if currentWordCount > c.config.IdealBatchItemSize || currentItemCount >= c.config.BatchSize {
+			flush()
 		}
+	}
+
+	if len(currentChunk) > 0 {
+		result = append(result, currentChunk)
 	}
 
 	return result
